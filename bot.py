@@ -37,7 +37,6 @@ threading.Thread(target=run_web, daemon=True).start()
 # 2. AUTONOMOUS SELF-PING ENGINE (KEEPS SERVER AWAKE)
 # =====================================================
 def auto_wake_engine():
-    # Render sleep bypass mechanism
     url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8080")
     while True:
         time.sleep(240)  # Pings every 4 minutes
@@ -52,24 +51,27 @@ threading.Thread(target=auto_wake_engine, daemon=True).start()
 # =====================================================
 # 3. CORE TELEGRAM MTPROTO ENGINE
 # =====================================================
-# Hardcore Error Handling for Configs
 try:
     API_ID = int(os.environ.get("API_ID"))
     API_HASH = os.environ.get("API_HASH")
     SESSION_STRING = os.environ.get("SESSION_STRING")
+    # MY_CHANNEL_ID ab ek primary destination hai, multiple ke liye list bhi use kar sakte hain
     MY_CHANNEL_ID = int(os.environ.get("MY_CHANNEL_ID"))
     SECRET_KEY = os.environ.get("SECRET_KEY", "ALPHA_BOT")
 except TypeError as e:
     print(f"[-] CRITICAL BOOT ERROR: Environment Variables Missing or Invalid! Ensure MY_CHANNEL_ID has -100. Error: {e}")
     exit(1)
 
+# Multiple Target Channels support ke liye set ki jagah dynamic storage
 active_channels = set()
+
 # Optimized deque to prevent memory overflow on Render Free Tier
 processed_msg_ids = deque(maxlen=2000)
 KEY_PATTERN = re.compile(r"\b[a-zA-Z0-9]{20,32}\b")
 
 app = Client("shadow_bot", session_string=SESSION_STRING, api_id=API_ID, api_hash=API_HASH)
 
+# Command se dynamic channel add karne ka feature (Tera original logic)
 @app.on_message(filters.me & filters.text & filters.regex(rf"^{SECRET_KEY}\s+ADD\s+(-\d+)"))
 async def add_new_channel(client, message):
     try:
@@ -83,13 +85,13 @@ async def add_new_channel(client, message):
         print(f"[-] Error adding channel: {e}")
         await message.reply_text(f"❌ Error locking target: {str(e)}")
 
-# BUG FIX APPLIED: Removed filters.supergroup (Deprecated)
+# MULTI-CHANNEL & MULTI-DESTINATION INTERCEPTOR ENGINE
 @app.on_message(filters.channel | filters.group | filters.private)
 async def intercept_and_forward(client, message):
     try:
         chat_id = message.chat.id
         
-        # Fast exit if channel is not in target list
+        # Fast exit if channel is not in active target list
         if chat_id not in active_channels:
             return
 
@@ -100,28 +102,32 @@ async def intercept_and_forward(client, message):
             return
         processed_msg_ids.append(message.id)
 
-        # Action A: APK Extraction (Hardcore File Verification)
-        if message.document:
-            file_name = (message.document.file_name or "").lower()
-            mime_type = message.document.mime_type or ""
-            if file_name.endswith(".apk") or "android.package-archive" in mime_type:
-                print(f"[+] APK detected ({file_name}). Mirroring to Destination: {MY_CHANNEL_ID}...")
-                await message.copy(MY_CHANNEL_ID)
-                print("[+] APK Mirrored Successfully!")
-                return
+        # Destined channels list (Agar ek se zyada jagah bhejna ho to is list me IDs daal sakta hai)
+        destinations = [MY_CHANNEL_ID] # Tu chahe toh yahan aur bhi IDs add kar sakta hai: [MY_CHANNEL_ID, -100999999999]
 
-        # Action B: Key & Text Extraction (Regex Parsing)
-        text_content = message.text or message.caption or ""
-        if text_content:
-            key_match = KEY_PATTERN.search(text_content)
-            if key_match:
-                extracted_key = key_match.group(0)
-                print(f"[+] Key pattern matched: {extracted_key} | Forwarding...")
-                await client.send_message(
-                    MY_CHANNEL_ID,
-                    f"🔥 **New Key Detected!**\n\n`{extracted_key}`\n\n_System Auto-grab_"
-                )
-                print("[+] Key Forwarded Successfully!")
+        for dest_id in destinations:
+            # Action A: APK Extraction (Hardcore File Verification)
+            if message.document:
+                file_name = (message.document.file_name or "").lower()
+                mime_type = message.document.mime_type or ""
+                if file_name.endswith(".apk") or "android.package-archive" in mime_type:
+                    print(f"[+] APK detected ({file_name}). Mirroring to Destination: {dest_id}...")
+                    await message.copy(dest_id)
+                    print(f"[+] APK Mirrored Successfully to {dest_id}!")
+                    continue
+
+            # Action B: Key & Text Extraction (Regex Parsing)
+            text_content = message.text or message.caption or ""
+            if text_content:
+                key_match = KEY_PATTERN.search(text_content)
+                if key_match:
+                    extracted_key = key_match.group(0)
+                    print(f"[+] Key pattern matched: {extracted_key} | Forwarding to {dest_id}...")
+                    await client.send_message(
+                        dest_id,
+                        f"🔥 **New Key Detected!**\n\n`{extracted_key}`\n\n_System Auto-grab_"
+                    )
+                    print(f"[+] Key Forwarded Successfully to {dest_id}!")
 
     except Exception as e:
         print(f"[-] CRITICAL ERROR in intercept_and_forward: {e}")
