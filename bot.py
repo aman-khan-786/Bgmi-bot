@@ -7,7 +7,7 @@ import asyncio
 from collections import deque
 
 # =====================================================
-# 0. THE FIX FOR PYTHON 3.14+ (CRITICAL FOR RENDER)
+# 0. ASYNCIO FIX FOR PYTHON 3.14+ (CRITICAL FOR RENDER)
 # =====================================================
 try:
     loop = asyncio.get_running_loop()
@@ -34,15 +34,16 @@ def run_web():
 threading.Thread(target=run_web, daemon=True).start()
 
 # =====================================================
-# 2. AUTONOMOUS SELF-PING ENGINE (NO TERMUX)
+# 2. AUTONOMOUS SELF-PING ENGINE (KEEPS SERVER AWAKE)
 # =====================================================
 def auto_wake_engine():
-    url = os.environ.get("RENDER_EXTERNAL_URL", "https://bgmi-bot-ebm7.onrender.com")
+    # Render sleep bypass mechanism
+    url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8080")
     while True:
-        time.sleep(240)  
+        time.sleep(240)  # Pings every 4 minutes
         try:
             urllib.request.urlopen(url)
-            print(f"[+] Self-Ping Fire! {url} is awake.")
+            print(f"[+] Self-Ping Fire! Engine is awake.")
         except Exception as e:
             print(f"[-] Self-Ping Missed: {e}")
 
@@ -51,14 +52,20 @@ threading.Thread(target=auto_wake_engine, daemon=True).start()
 # =====================================================
 # 3. CORE TELEGRAM MTPROTO ENGINE
 # =====================================================
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-SESSION_STRING = os.environ.get("SESSION_STRING")
-MY_CHANNEL_ID = int(os.environ.get("MY_CHANNEL_ID"))
-SECRET_KEY = os.environ.get("SECRET_KEY", "ALPHA_BOT")
+# Hardcore Error Handling for Configs
+try:
+    API_ID = int(os.environ.get("API_ID"))
+    API_HASH = os.environ.get("API_HASH")
+    SESSION_STRING = os.environ.get("SESSION_STRING")
+    MY_CHANNEL_ID = int(os.environ.get("MY_CHANNEL_ID"))
+    SECRET_KEY = os.environ.get("SECRET_KEY", "ALPHA_BOT")
+except TypeError as e:
+    print(f"[-] CRITICAL BOOT ERROR: Environment Variables Missing or Invalid! Ensure MY_CHANNEL_ID has -100. Error: {e}")
+    exit(1)
 
 active_channels = set()
-processed_msg_ids = deque(maxlen=1000)
+# Optimized deque to prevent memory overflow on Render Free Tier
+processed_msg_ids = deque(maxlen=2000)
 KEY_PATTERN = re.compile(r"\b[a-zA-Z0-9]{20,32}\b")
 
 app = Client("shadow_bot", session_string=SESSION_STRING, api_id=API_ID, api_hash=API_HASH)
@@ -71,48 +78,51 @@ async def add_new_channel(client, message):
         await message.reply_text(
             f"✅ **Target Locked!**\nMonitoring Channel ID: `{new_channel_id}`\nAutonomous Engine Active."
         )
-        print(f"[+] Successfully added channel: {new_channel_id}")
+        print(f"[+] Successfully added target channel: {new_channel_id}")
     except Exception as e:
         print(f"[-] Error adding channel: {e}")
         await message.reply_text(f"❌ Error locking target: {str(e)}")
 
-# DEBUG-READY INTERCEPTOR WITH EXCEPTION LOGGING
-@app.on_message(filters.channel | filters.group | filters.supergroup | filters.private)
+# BUG FIX APPLIED: Removed filters.supergroup (Deprecated)
+@app.on_message(filters.channel | filters.group | filters.private)
 async def intercept_and_forward(client, message):
     try:
         chat_id = message.chat.id
-        print(f"[DEBUG] Incoming message from Chat ID: {chat_id} | Active Targets: {active_channels}")
         
+        # Fast exit if channel is not in target list
         if chat_id not in active_channels:
             return
 
+        print(f"[DEBUG] Incoming payload from Target ID: {chat_id}")
+
+        # Prevent duplicate processing
         if message.id in processed_msg_ids:
             return
         processed_msg_ids.append(message.id)
 
-        # Action A: APK Extraction
+        # Action A: APK Extraction (Hardcore File Verification)
         if message.document:
             file_name = (message.document.file_name or "").lower()
-            print(f"[DEBUG] Document found: {file_name}")
-            if file_name.endswith(".apk") or "android.package-archive" in str(message.document.mime_type):
-                print(f"[+] Matching APK detected! Copying to {MY_CHANNEL_ID}...")
+            mime_type = message.document.mime_type or ""
+            if file_name.endswith(".apk") or "android.package-archive" in mime_type:
+                print(f"[+] APK detected ({file_name}). Mirroring to Destination: {MY_CHANNEL_ID}...")
                 await message.copy(MY_CHANNEL_ID)
-                print("[+] APK Copied Successfully!")
+                print("[+] APK Mirrored Successfully!")
                 return
 
-        # Action B: Key & Text Extraction
+        # Action B: Key & Text Extraction (Regex Parsing)
         text_content = message.text or message.caption or ""
         if text_content:
-            print(f"[DEBUG] Text content found: {text_content}")
             key_match = KEY_PATTERN.search(text_content)
             if key_match:
                 extracted_key = key_match.group(0)
-                print(f"[+] Matching Key detected: {extracted_key} | Forwarding...")
+                print(f"[+] Key pattern matched: {extracted_key} | Forwarding...")
                 await client.send_message(
                     MY_CHANNEL_ID,
                     f"🔥 **New Key Detected!**\n\n`{extracted_key}`\n\n_System Auto-grab_"
                 )
                 print("[+] Key Forwarded Successfully!")
+
     except Exception as e:
         print(f"[-] CRITICAL ERROR in intercept_and_forward: {e}")
 
