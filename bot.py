@@ -15,7 +15,6 @@ except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-# Pyrogram must be imported AFTER setting the event loop
 from pyrogram import Client, filters
 from flask import Flask
 
@@ -72,35 +71,50 @@ async def add_new_channel(client, message):
         await message.reply_text(
             f"✅ **Target Locked!**\nMonitoring Channel ID: `{new_channel_id}`\nAutonomous Engine Active."
         )
+        print(f"[+] Successfully added channel: {new_channel_id}")
     except Exception as e:
+        print(f"[-] Error adding channel: {e}")
         await message.reply_text(f"❌ Error locking target: {str(e)}")
 
-@app.on_message(filters.channel | filters.group)
+# DEBUG-READY INTERCEPTOR WITH EXCEPTION LOGGING
+@app.on_message(filters.channel | filters.group | filters.supergroup | filters.private)
 async def intercept_and_forward(client, message):
-    chat_id = message.chat.id
-    
-    if chat_id not in active_channels:
-        return
-
-    if message.id in processed_msg_ids:
-        return
-    processed_msg_ids.append(message.id)
-
-    if message.document:
-        file_name = (message.document.file_name or "").lower()
-        if file_name.endswith(".apk") or message.document.mime_type == "application/vnd.android.package-archive":
-            await message.copy(MY_CHANNEL_ID)
+    try:
+        chat_id = message.chat.id
+        print(f"[DEBUG] Incoming message from Chat ID: {chat_id} | Active Targets: {active_channels}")
+        
+        if chat_id not in active_channels:
             return
 
-    text_content = message.text or message.caption or ""
-    key_match = KEY_PATTERN.search(text_content)
-    
-    if key_match:
-        extracted_key = key_match.group(0)
-        await client.send_message(
-            MY_CHANNEL_ID,
-            f"🔥 **New Key Detected!**\n\n`{extracted_key}`\n\n_System Auto-grab_"
-        )
+        if message.id in processed_msg_ids:
+            return
+        processed_msg_ids.append(message.id)
+
+        # Action A: APK Extraction
+        if message.document:
+            file_name = (message.document.file_name or "").lower()
+            print(f"[DEBUG] Document found: {file_name}")
+            if file_name.endswith(".apk") or "android.package-archive" in str(message.document.mime_type):
+                print(f"[+] Matching APK detected! Copying to {MY_CHANNEL_ID}...")
+                await message.copy(MY_CHANNEL_ID)
+                print("[+] APK Copied Successfully!")
+                return
+
+        # Action B: Key & Text Extraction
+        text_content = message.text or message.caption or ""
+        if text_content:
+            print(f"[DEBUG] Text content found: {text_content}")
+            key_match = KEY_PATTERN.search(text_content)
+            if key_match:
+                extracted_key = key_match.group(0)
+                print(f"[+] Matching Key detected: {extracted_key} | Forwarding...")
+                await client.send_message(
+                    MY_CHANNEL_ID,
+                    f"🔥 **New Key Detected!**\n\n`{extracted_key}`\n\n_System Auto-grab_"
+                )
+                print("[+] Key Forwarded Successfully!")
+    except Exception as e:
+        print(f"[-] CRITICAL ERROR in intercept_and_forward: {e}")
 
 if __name__ == "__main__":
     print("Final C2 Server Initialized... Booting MTProto Engine!")
