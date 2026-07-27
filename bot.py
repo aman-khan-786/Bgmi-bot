@@ -1,21 +1,39 @@
 import os
 import re
+import threading
 from collections import deque
 from pyrogram import Client, filters
+from flask import Flask
 
-# Fetching details from Render Environment Variables
+# =====================================================
+# 1. DUMMY WEB SERVER (TO BYPASS RENDER CC REQUIREMENT)
+# =====================================================
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def health_check():
+    return "C2 Engine is Online and Scraping!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host="0.0.0.0", port=port)
+
+# Start the dummy web server in an isolated background thread
+threading.Thread(target=run_web, daemon=True).start()
+
+# =====================================================
+# 2. CORE TELEGRAM MTPROTO ENGINE
+# =====================================================
 API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("SESSION_STRING")
 MY_CHANNEL_ID = int(os.environ.get("MY_CHANNEL_ID"))
 SECRET_KEY = os.environ.get("SECRET_KEY", "ALPHA_BOT")
 
-# Smart Variables (In-Memory)
 active_channels = set()
 processed_msg_ids = deque(maxlen=1000)
 KEY_PATTERN = re.compile(r"\b[a-zA-Z0-9]{20,32}\b")
 
-# Initialize the Userbot with Session String
 app = Client("shadow_bot", session_string=SESSION_STRING, api_id=API_ID, api_hash=API_HASH)
 
 @app.on_message(filters.me & filters.text & filters.regex(rf"^{SECRET_KEY}\s+ADD\s+(-\d+)"))
@@ -55,5 +73,5 @@ async def intercept_and_forward(client, message):
         )
 
 if __name__ == "__main__":
-    print("Cloud Userbot Engine Started...")
+    print("Cloud Userbot Engine + Web Bypass Started...")
     app.run()
